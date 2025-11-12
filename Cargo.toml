@@ -10,3 +10,13 @@ version = "0.1.0"
 [dependencies]
 livi = "0.7"
 livi-external-ui = { git = "https://github.com/SanderVocke/livi-external-ui.git" }
+
+[dev-dependencies]
+env_logger = "0.11.8"
+hound = "3.5.1"
+jack = { version = "0.11" }
+lazy_static = "1.4"
+structopt = "0.3"
+tempfile = "3.6"
+lv2_raw = "0.2"
+log = "0.4"

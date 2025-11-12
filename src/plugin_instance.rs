@@ -6,7 +6,7 @@ pub struct PluginInstance {
 }
 
 impl PluginInstance {
-    pub fn new(plugin : &crate::world::Plugin, uri: &str) -> Result<Self> {
+    pub fn new(plugin : &crate::Plugin, uri: &str) -> Result<Self> {
         todo!();
     }
 }

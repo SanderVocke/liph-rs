@@ -1,13 +1,8 @@
 use crate::Error;
-use crate::PluginInstance;
+use crate::Plugin;
 use crate::Result;
 use livi_external_ui::external_ui::{ExternalUI, ExternalUILibrary};
 use std::collections::HashMap;
-
-pub struct Plugin {
-    plugin: livi::Plugin,
-    ui: Option<(ExternalUI, ExternalUILibrary)>,
-}
 
 pub struct World {
     world: livi::World,
@@ -22,11 +17,18 @@ impl World {
         }
     }
 
-    pub fn get_plugin<'a>(&'a mut self, plugin_uri: &str) -> Result<&'a Plugin> {
+    pub fn get_plugin<'a>(&'a self, plugin_uri: &str) -> Result<&'a Plugin> {
         if self.plugins.contains_key(plugin_uri) {
             return Ok(self.plugins.get(plugin_uri).ok_or(Error::InternalError(
                 "Could not find registered plugin".to_string(),
             ))?);
+        }
+        return Err(Error::PluginNotFoundError("Plugin not loaded yet".to_string()));
+    }
+
+    pub fn ensure_plugin<'a>(&'a mut self, plugin_uri: &str) -> Result<()> {
+        if self.plugins.contains_key(plugin_uri) {
+            return Ok(());
         }
 
         let livi_plugin = self
@@ -61,12 +63,10 @@ impl World {
             plugin_uri.to_string(),
             Plugin {
                 plugin: livi_plugin,
-                ui: None,
+                ui: the_ui,
             },
         );
 
-        return Ok(self.plugins.get(plugin_uri).ok_or(Error::InternalError(
-            "Could not find registered plugin".to_string(),
-        ))?);
+        Ok(())
     }
 }
