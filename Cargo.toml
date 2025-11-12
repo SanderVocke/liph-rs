@@ -1,0 +1,12 @@
+[package]
+authors = ["Sander Vocke <sandervocke@gmail.com>"]
+description = "LV2 plugin hosting library with sandboxing support."
+edition = "2024"
+keywords = ["realtime", "audio", "lv2", "plugins", "music"]
+license = "MIT"
+name = "liph"
+version = "0.1.0"
+
+[dependencies]
+livi = "0.7"
+livi-external-ui = { git = "https://github.com/SanderVocke/livi-external-ui.git" }
