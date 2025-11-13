@@ -2,7 +2,7 @@ use livi_external_ui::external_ui::{
     ExternalUIInstance, ExternalUIInstanceRunner, ExternalUILibrary,
 };
 
-use crate::{Error, Result, SharedWorld};
+use crate::{Error, PortConnections, Result, SharedWorld};
 
 pub struct PluginInstance {
     plugin: livi::Instance,
@@ -62,7 +62,27 @@ impl crate::PluginInstanceAPI for PluginInstance {
         todo!()
     }
 
-    fn process(ports: &mut crate::PortBufferHandles) -> Result<()> {
-        todo!()
+    unsafe fn run<'a, AudioInputs, AudioOutputs, MidiInputs, MidiOutputs, CVInputs, CVOutputs>(
+        &mut self,
+        samples: usize,
+        ports: PortConnections<
+            'a,
+            AudioInputs,
+            AudioOutputs,
+            MidiInputs,
+            MidiOutputs,
+            CVInputs,
+            CVOutputs,
+        >,
+    ) -> Result<()>
+    where
+        AudioInputs: ExactSizeIterator + Iterator<Item = &'a [f32]>,
+        AudioOutputs: ExactSizeIterator + Iterator<Item = &'a mut [f32]>,
+        MidiInputs: ExactSizeIterator + Iterator<Item = &'a [u8]>,
+        MidiOutputs: ExactSizeIterator + Iterator<Item = &'a mut [u8]>,
+        CVInputs: ExactSizeIterator + Iterator<Item = &'a [f32]>,
+        CVOutputs: ExactSizeIterator + Iterator<Item = &'a mut [f32]>,
+    {
+        todo!();
     }
 }
