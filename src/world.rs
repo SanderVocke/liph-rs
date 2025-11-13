@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 pub type SharedPlugin = Arc<Mutex<Plugin>>;
 
@@ -21,6 +22,10 @@ impl World {
             world: livi::World::new(),
             plugins: HashMap::new(),
         }
+    }
+
+    pub fn raw<'a>(&'a self) -> &'a livi::World {
+        &self.world
     }
 
     pub fn get_plugin(&self, plugin_uri: &str) -> Result<SharedPlugin> {
@@ -42,7 +47,7 @@ impl World {
             .plugin_by_uri(plugin_uri)
             .ok_or(Error::PluginNotFoundError(plugin_uri.to_string()))?;
 
-        let mut the_ui: Option<(ExternalUI, ExternalUILibrary)> = None;
+        let mut the_ui: Option<ExternalUI> = None;
 
         {
             let mut uis = livi_external_ui::ui::plugin_uis(&self.world, &livi_plugin)
@@ -55,12 +60,8 @@ impl World {
                         plugin_uri
                     );
                 }
-
                 if let livi_external_ui::ui::UI::External(ui) = ui {
-                    let lib = ui.load().map_err(|e| {
-                        Error::UIError(livi_external_ui::ui::LiviUIError::LiviExternalUIError(e))
-                    })?;
-                    the_ui = Some((ui, lib));
+                    the_ui = Some(ui);
                 }
             }
         }
@@ -77,6 +78,7 @@ impl World {
     }
 }
 
+#[derive(Clone)]
 pub struct SharedWorld {
     pub world: Arc<Mutex<World>>,
 }
@@ -95,6 +97,13 @@ impl SharedWorld {
                 world.get_plugin(uri)
             },
             Err(e) => Err(Error::InternalError(e.to_string())),
+        }
+    }
+
+    pub fn raw<'a>(&'a self) -> Result<MutexGuard<'a, World>> {
+        match self.world.lock() {
+            Ok(world) => Ok(world),
+            Err(e) => Err(Error::InternalError(format!("Could not lock mutex: {e}")))
         }
     }
 }

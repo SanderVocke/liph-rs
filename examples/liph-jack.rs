@@ -1,11 +1,11 @@
-use liph::{SharedPlugin, SharedWorld, World};
+use liph::{PluginInstance, PluginInstanceFactory, SharedPlugin, SharedWorld, World};
 /// liph-jack hosts an LV2 plugin on JACK with external UI support.
 ///
 /// Run with: `cargo run --release -- --plugin-uri=${PLUGIN_URI}`
 use livi::event::LV2AtomSequence;
+use log::{debug, error, info, warn};
 use std::{convert::TryFrom, ffi::CStr};
 use structopt::StructOpt;
-use log::{debug, error, info, warn};
 
 /// The configuration for the backend.
 #[derive(StructOpt, Debug)]
@@ -31,19 +31,35 @@ fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder().init();
 
     let mut world = liph::SharedWorld::new();
-    let plugin = world
-        .plugin_by_uri(&config.plugin_uri)?;
+    let plugin = world.plugin_by_uri(&config.plugin_uri)?;
+
+    let plugin_name;
+    let instance_factory;
+    {
+        match plugin.lock() {
+            Ok(plugin_locked) => {
+                plugin_name = plugin_locked.raw().name();
+                instance_factory = plugin_locked.create_instance_factory(&world)?;
+            },
+            Err(e) => { return Err(format!("Could not lock mutex: {e}").into()); }
+        }
+    }
 
     let client;
     let status;
     {
-        let plugin = plugin.lock()?;
         (client, status) =
-            jack::Client::new(&plugin.name(), jack::ClientOptions::NO_START_SERVER).unwrap();
+            jack::Client::new(&plugin_name, jack::ClientOptions::NO_START_SERVER).unwrap();
         info!("Created jack client {:?} with status {:?}.", client, status);
     }
 
-    let process_handler = Processor::new(&world, plugin, &client, 1.0);
+    let process_handler = Processor::new(
+        &world,
+        instance_factory,
+        &client,
+        1.0,
+    ).unwrap_or_else(|e| panic!("Could not create processo: {e}"));
+
     process_handler.autoconnect(&client);
 
     // Keep reference to client to prevent it from dropping.
@@ -54,7 +70,7 @@ fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct Processor {
-    plugin: SharedPlugin,
+    plugin: PluginInstance,
     midi_urid: lv2_raw::LV2Urid,
     audio_inputs: Vec<jack::Port<jack::AudioIn>>,
     audio_outputs: Vec<jack::Port<jack::AudioOut>>,
@@ -68,61 +84,67 @@ struct Processor {
 impl Processor {
     fn new(
         world: &SharedWorld,
-        plugin: SharedPlugin,
+        plugin: PluginInstanceFactory,
         client: &jack::Client,
         volume: f32,
-    ) -> Processor {
+    ) -> Result<Processor, Box<dyn std::error::Error>> {
         let buffer_size = client.buffer_size() as usize;
-        let features = world.build_features(livi::FeaturesBuilder {
+
+        let features = world.raw()?
+                .raw()
+                .build_features(livi::FeaturesBuilder {
             min_block_length: 1,
             max_block_length: buffer_size,
         });
-        #[allow(clippy::cast_precision_loss)]
-        let plugin_instance = unsafe {
-            plugin
-                .instantiate(features.clone(), client.sample_rate() as f64)
-                .unwrap()
-        };
 
-        let audio_inputs: Vec<jack::Port<jack::AudioIn>> = plugin
-            .ports_with_type(livi::PortType::AudioInput)
-            .inspect(|p| info!("Initializing audio input {}.", p.name))
-            .map(|p| client.register_port(&p.name, jack::AudioIn).unwrap())
-            .collect();
-        let audio_outputs: Vec<jack::Port<jack::AudioOut>> = plugin
-            .ports_with_type(livi::PortType::AudioOutput)
-            .inspect(|p| info!("Initializing audio output {}.", p.name))
-            .map(|p| client.register_port(&p.name, jack::AudioOut).unwrap())
-            .collect();
-        const EVENT_BUFFER_SIZE: usize = 262_144; // ~262KiB
-        let event_inputs = plugin
-            .ports_with_type(livi::PortType::AtomSequenceInput)
-            .map(|p| client.register_port(&p.name, jack::MidiIn).unwrap())
-            .map(|p| (p, LV2AtomSequence::new(&features, EVENT_BUFFER_SIZE)))
-            .collect::<Vec<_>>();
-        let event_outputs = plugin
-            .ports_with_type(livi::PortType::AtomSequenceOutput)
-            .map(|p| client.register_port(&p.name, jack::MidiOut).unwrap())
-            .map(|p| (p, LV2AtomSequence::new(&features, EVENT_BUFFER_SIZE)))
-            .collect::<Vec<_>>();
-        let cv_inputs: Vec<jack::Port<jack::AudioIn>> = plugin
-            .ports_with_type(livi::PortType::CVInput)
-            .inspect(|p| info!("Initializing cv input {}.", p.name))
-            .map(|p| {
-                client
-                    .register_port(&format!("CV: {}", p.name), jack::AudioIn)
-                    .unwrap()
-            })
-            .collect();
-        let cv_outputs: Vec<jack::Port<jack::AudioOut>> = plugin
-            .ports_with_type(livi::PortType::CVOutput)
-            .inspect(|p| info!("Initializing cv output {}.", p.name))
-            .map(|p| {
-                client
-                    .register_port(&format!("CV: {}", p.name), jack::AudioOut)
-                    .unwrap()
-            })
-            .collect();
+        let plugin_instance = plugin.instantiate(48000.0)?;
+
+        // #[allow(clippy::cast_precision_loss)]
+        // let plugin_instance = unsafe {
+        //     plugin
+        //         .instantiate(features.clone(), client.sample_rate() as f64)
+        //         .unwrap()
+        // };
+
+        // let audio_inputs: Vec<jack::Port<jack::AudioIn>> = plugin
+        //     .ports_with_type(livi::PortType::AudioInput)
+        //     .inspect(|p| info!("Initializing audio input {}.", p.name))
+        //     .map(|p| client.register_port(&p.name, jack::AudioIn).unwrap())
+        //     .collect();
+        // let audio_outputs: Vec<jack::Port<jack::AudioOut>> = plugin
+        //     .ports_with_type(livi::PortType::AudioOutput)
+        //     .inspect(|p| info!("Initializing audio output {}.", p.name))
+        //     .map(|p| client.register_port(&p.name, jack::AudioOut).unwrap())
+        //     .collect();
+        // const EVENT_BUFFER_SIZE: usize = 262_144; // ~262KiB
+        // let event_inputs = plugin
+        //     .ports_with_type(livi::PortType::AtomSequenceInput)
+        //     .map(|p| client.register_port(&p.name, jack::MidiIn).unwrap())
+        //     .map(|p| (p, LV2AtomSequence::new(&features, EVENT_BUFFER_SIZE)))
+        //     .collect::<Vec<_>>();
+        // let event_outputs = plugin
+        //     .ports_with_type(livi::PortType::AtomSequenceOutput)
+        //     .map(|p| client.register_port(&p.name, jack::MidiOut).unwrap())
+        //     .map(|p| (p, LV2AtomSequence::new(&features, EVENT_BUFFER_SIZE)))
+        //     .collect::<Vec<_>>();
+        // let cv_inputs: Vec<jack::Port<jack::AudioIn>> = plugin
+        //     .ports_with_type(livi::PortType::CVInput)
+        //     .inspect(|p| info!("Initializing cv input {}.", p.name))
+        //     .map(|p| {
+        //         client
+        //             .register_port(&format!("CV: {}", p.name), jack::AudioIn)
+        //             .unwrap()
+        //     })
+        //     .collect();
+        // let cv_outputs: Vec<jack::Port<jack::AudioOut>> = plugin
+        //     .ports_with_type(livi::PortType::CVOutput)
+        //     .inspect(|p| info!("Initializing cv output {}.", p.name))
+        //     .map(|p| {
+        //         client
+        //             .register_port(&format!("CV: {}", p.name), jack::AudioOut)
+        //             .unwrap()
+        //     })
+        //     .collect();
         Processor {
             plugin: plugin_instance,
             midi_urid: features.midi_urid(),
