@@ -1,3 +1,4 @@
+use liph::{SharedPlugin, SharedWorld, World};
 /// liph-jack hosts an LV2 plugin on JACK with external UI support.
 ///
 /// Run with: `cargo run --release -- --plugin-uri=${PLUGIN_URI}`
@@ -29,14 +30,18 @@ fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
     let config = Configuration::from_args();
     env_logger::builder().init();
 
-    let mut world = liph::World::new();
-    world.ensure_plugin(&config.plugin_uri)?;
+    let mut world = liph::SharedWorld::new();
     let plugin = world
-        .get_plugin(&config.plugin_uri)?;
+        .plugin_by_uri(&config.plugin_uri)?;
 
-    let (client, status) =
-        jack::Client::new(&plugin.name(), jack::ClientOptions::NO_START_SERVER).unwrap();
-    info!("Created jack client {:?} with status {:?}.", client, status);
+    let client;
+    let status;
+    {
+        let plugin = plugin.lock()?;
+        (client, status) =
+            jack::Client::new(&plugin.name(), jack::ClientOptions::NO_START_SERVER).unwrap();
+        info!("Created jack client {:?} with status {:?}.", client, status);
+    }
 
     let process_handler = Processor::new(&world, plugin, &client, 1.0);
     process_handler.autoconnect(&client);
@@ -49,7 +54,7 @@ fn main_impl() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct Processor {
-    plugin: livi::Instance,
+    plugin: SharedPlugin,
     midi_urid: lv2_raw::LV2Urid,
     audio_inputs: Vec<jack::Port<jack::AudioIn>>,
     audio_outputs: Vec<jack::Port<jack::AudioOut>>,
@@ -62,8 +67,8 @@ struct Processor {
 
 impl Processor {
     fn new(
-        world: &liph::World,
-        plugin: &liph::Plugin,
+        world: &SharedWorld,
+        plugin: SharedPlugin,
         client: &jack::Client,
         volume: f32,
     ) -> Processor {

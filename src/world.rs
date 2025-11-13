@@ -2,11 +2,17 @@ use crate::Error;
 use crate::Plugin;
 use crate::Result;
 use livi_external_ui::external_ui::{ExternalUI, ExternalUILibrary};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+pub type SharedPlugin = Arc<Mutex<Plugin>>;
 
 pub struct World {
     world: livi::World,
-    plugins: HashMap<String, Plugin>,
+    plugins: HashMap<String, SharedPlugin>,
 }
 
 impl World {
@@ -17,11 +23,11 @@ impl World {
         }
     }
 
-    pub fn get_plugin<'a>(&'a self, plugin_uri: &str) -> Result<&'a Plugin> {
+    pub fn get_plugin(&self, plugin_uri: &str) -> Result<SharedPlugin> {
         if self.plugins.contains_key(plugin_uri) {
             return Ok(self.plugins.get(plugin_uri).ok_or(Error::InternalError(
                 "Could not find registered plugin".to_string(),
-            ))?);
+            ))?.clone());
         }
         return Err(Error::PluginNotFoundError("Plugin not loaded yet".to_string()));
     }
@@ -61,12 +67,34 @@ impl World {
 
         self.plugins.insert(
             plugin_uri.to_string(),
-            Plugin {
+            Arc::new(Mutex::new(Plugin {
                 plugin: livi_plugin,
                 ui: the_ui,
-            },
+            })),
         );
 
         Ok(())
+    }
+}
+
+pub struct SharedWorld {
+    pub world: Arc<Mutex<World>>,
+}
+
+impl SharedWorld {
+    pub fn new() -> Self {
+        Self {
+            world: Arc::new(Mutex::new(World::new())),
+        }
+    }
+
+    pub fn plugin_by_uri(&self, uri: &str) -> Result<SharedPlugin> {
+        match self.world.lock() {
+            Ok(mut world) => {
+                world.ensure_plugin(uri)?;
+                world.get_plugin(uri)
+            },
+            Err(e) => Err(Error::InternalError(e.to_string())),
+        }
     }
 }
